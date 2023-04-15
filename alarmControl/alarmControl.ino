@@ -9,6 +9,10 @@
 
 
 #define ALARM_PANEL_ARMED D1
+#define ALARM_PANEL_SIREN D2
+#define ALARM_PANEL_ARM D7
+#define ALARM_PANEL_DISARM D6
+
 
 
 //https://github.com/arachnetech/homebridge-mqttthing/blob/HEAD/docs/Accessories.md#garage-door-opener
@@ -17,32 +21,24 @@
 const char *ssid = STASSID;
 const char *password = STAPSK;
 
-const long interval = 1000;
-unsigned long previousMillis = 0;
-
-IPAddress ip(192, 168, 1, 209);
-IPAddress gateway(192, 168, 1, 1);
-IPAddress ipmask(255, 255, 255, 0);
-IPAddress dns(192, 168, 1, 2);
 
 WiFiClient wifiClient;
 MqttClient mqttClient(wifiClient);
 
 const char broker[] = "192.168.1.2";
-int        port     = 1883;
-const char topic_set_target_state[]  = "alarm/set-target-state";
-const char topic_get_target_state[]  = "alarm/get-target-state";
-const char topic_get_current_state[]  = "alarm/get-current-state";
-const char topic_current_state[]  = "alarm/current-state";
+int port = 1883;
+const char topic_set_target_state[] = "alarm/set-target-state";
+const char topic_get_target_state[] = "alarm/get-target-state";
+const char topic_get_current_state[] = "alarm/get-current-state";
+const char topic_current_state[] = "alarm/current-state";
 
 const char ARM_AWAY[] = "AA";
 const char DISARMED[] = "D";
+const char DISARM[] = "D";
 const char DISARM_AWAY[] = "DA";
 const char TRIGGERED[] = "T";
 
 
-int alarmPanelArmed = 0;
-int alarmPanelTriggered = 0;
 //alarm outputs
 //1 siren
 //2 = custom - armed
@@ -59,8 +55,7 @@ enum OnOffState {
 };
 
 
-void setup()
-{
+void setup() {
   Serial.begin(115200);
   Serial.println("");
   Serial.println("");
@@ -69,18 +64,16 @@ void setup()
   Serial.println("");
 
 
-/// WIFI Setup
+  /// WIFI Setup
   String mac = WiFi.macAddress();
   Serial.print("MAC address: ");
   Serial.println(mac);
 
   Serial.print("Connecting to wifi...");
 
-  WiFi.config(ip, gateway, ipmask, dns);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED)
-  {
+  while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
@@ -89,52 +82,61 @@ void setup()
   Serial.println(WiFi.localIP());
 
 
-/// MQTT Setup
-  Serial.print("Attempting to connect to the MQTT broker: ");
+  /// MQTT Setup
+  Serial.print("Connecting to MQTT broker: ");
   Serial.println(broker);
-  mqttClient.setId("alarmduino");  
+  mqttClient.setId("alarmduino");
   // mqttClient.setUsernamePassword("username", "password");
 
   if (!mqttClient.connect(broker, port)) {
     Serial.print("MQTT connection failed! Error code = ");
     Serial.println(mqttClient.connectError());
-
-    while (1);
+    while (1)
+      ;
   }
 
   mqttClient.onMessage(onMqttMessage);
   mqttClient.subscribe(topic_set_target_state);
 
-  pinMode(ALARM_PANEL_ARMED, INPUT);
 
+  pinMode(ALARM_PANEL_ARM, OUTPUT);
+  pinMode(ALARM_PANEL_DISARM, OUTPUT);
+
+
+  pinMode(ALARM_PANEL_ARMED, INPUT_PULLDOWN_16);
+  pinMode(ALARM_PANEL_SIREN, INPUT_PULLDOWN_16);
+
+  attachInterrupt(digitalPinToInterrupt(ALARM_PANEL_ARMED), onAlarmStateChanged, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ALARM_PANEL_SIREN), onAlarmStateChanged, CHANGE);
+
+  ProcessAlarmState();
 }
 
-OnOffState currentArmedState = unknown;
-OnOffState currentSirenState = unknown;
+ICACHE_RAM_ATTR void onAlarmStateChanged() {
+  Serial.println("Alarm State changed!");
+  ProcessAlarmState();
+}
 
-void loop()
-{
+void loop() {
   if (WiFi.status() != WL_CONNECTED) { return; }
 
-  mqttClient.poll();
+  //end the momentary push of the keyswitch after a delay (if they are on)
+  EndDisarmAlarmPanel();
+  EndArmAlarmPanel();
 
-/// only execute once every interval (1 sec ish)
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval) {
-    // save the last time a message was sent
-    previousMillis = currentMillis;  
-    ProcessAlarmState();
-  }
-///------ 
+  mqttClient.poll();
 }
 
-const char* previousState = "?";
+
+
+
+const char *previousState = "?";
 
 void ProcessAlarmState() {
 
-  const char* currentState = GetAlarmState();
+  const char *currentState = GetAlarmState();
 
-  if (previousState != currentState){
+  if (previousState != currentState) {
     PublishGetTargetState(currentState);
     previousState = currentState;
   }
@@ -142,45 +144,44 @@ void ProcessAlarmState() {
   PublishCurrentState(currentState);
 }
 
-const char* GetAlarmState() {
-  
+const char *GetAlarmState() {
+
   OnOffState armedState = ReadArmedState();
   OnOffState sirenState = ReadSirenState();
 
-  if (sirenState == on ) {
+  if (sirenState == on) {
     //set triggered
     return TRIGGERED;
   } else if (armedState == on) {
-    //set armed   
+    //set armed
     return ARM_AWAY;
   } else if (armedState == off) {
-    //set disarmed   
+    //set disarmed
     return DISARMED;
   } else {
     //uh oh
     return "?";
   }
-
 }
 
-void PublishGetTargetState(const char *state){
+void PublishGetTargetState(const char *state) {
   PublishState(state, topic_get_target_state);
 }
 
-void PublishSetTargetState(const char *state){
+void PublishSetTargetState(const char *state) {
   PublishState(state, topic_set_target_state);
 }
 
-void PublishCurrentState(const char *state){
+void PublishCurrentState(const char *state) {
   PublishState(state, topic_current_state);
 }
 
 void PublishState(const char *state, const char *topic) {
 
   Serial.print("Sending message to topic: ");
-  Serial.println(topic);
+  Serial.print(topic);
+  Serial.print(" = ");
   Serial.println(state);
-  Serial.println("-------");
 
   mqttClient.beginMessage(topic);
   mqttClient.print(state);
@@ -190,25 +191,54 @@ void PublishState(const char *state, const char *topic) {
 OnOffState ReadArmedState() {
   int val = digitalRead(ALARM_PANEL_ARMED);
 
-  Serial.print("Reading state: ");
+  Serial.print("Reading Armed state: ");
   Serial.println(val);
 
-
-  return val==0
-    ? off
-    : on;
+  return val == 0
+           ? off
+           : on;
 }
 
 OnOffState ReadSirenState() {
-  return off;
+  int val = digitalRead(ALARM_PANEL_SIREN);
+
+  Serial.print("Reading Siren state: ");
+  Serial.println(val);
+
+  return val == 0
+           ? off
+           : on;
 }
 
-void ArmAlarmPanel(){
-  alarmPanelArmed = 1;
+const long keySwitchPushDuration = 500;
+long timeArmStarted = 0;
+void BeginArmAlarmPanel() {
+  Serial.println("Sending Keyswitch ARM monentary signal (ON)");
+  timeArmStarted = millis();
+  digitalWrite(ALARM_PANEL_ARM, 1);
+}
+void EndArmAlarmPanel() {
+  if (timeArmStarted == 0) { return; }
+  if ((millis() - timeArmStarted) > keySwitchPushDuration) {
+    Serial.println("Sending Keyswitch ARM monentary signal (OFF)");
+    digitalWrite(ALARM_PANEL_ARM, 0);
+    timeArmStarted = 0;
+  }
 }
 
-void DisarmAlarmPanel() {
-  alarmPanelArmed = 0;
+long timeDisarmStarted = 0;
+void BeginDisarmAlarmPanel() {
+  Serial.println("Sending Keyswitch DISARM monentary signal (ON)");
+  timeDisarmStarted = millis();
+  digitalWrite(ALARM_PANEL_DISARM, 1);
+}
+void EndDisarmAlarmPanel() {
+  if (timeDisarmStarted == 0) { return; }
+  if ((millis() - timeDisarmStarted) > keySwitchPushDuration) {
+    digitalWrite(ALARM_PANEL_DISARM, 0);
+    timeDisarmStarted = 0;
+    Serial.println("Sending Keyswitch DISARM monentary signal (OFF)");
+  }
 }
 
 const int messageBufferSize = 10;
@@ -218,26 +248,29 @@ void onMqttMessage(int messageSize) {
 
   String topic = mqttClient.messageTopic();
 
-  if(topic != topic_set_target_state){
+  if (topic != topic_set_target_state) {
     Serial.println("Message received for unknown topic!");
     return;
   }
 
   int bytesToReadIntoBuffer = messageSize > messageBufferSize
-    ? messageBufferSize
-    : messageSize;
+                                ? messageBufferSize
+                                : messageSize;
 
   mqttClient.read(messageBuffer, bytesToReadIntoBuffer);
 
-  if (strcmp((char *) messageBuffer, ARM_AWAY) == 0) {
+  if (strcmp((char *)messageBuffer, ARM_AWAY) == 0) {
     Serial.println("Arming...");
-    ArmAlarmPanel();
-  } else if (strcmp((char *) messageBuffer, DISARM_AWAY) == 0) {
+    BeginArmAlarmPanel();
+  } else if (strcmp((char *)messageBuffer, DISARM_AWAY) == 0) {
     Serial.println("Disarming...");
-    DisarmAlarmPanel();
+    BeginDisarmAlarmPanel();
+  } else if (strcmp((char *)messageBuffer, DISARM) == 0) {
+    Serial.println("Disarming...");
+    BeginDisarmAlarmPanel();
   } else {
     Serial.print("Unknown command! ");
-    Serial.println((char *) messageBuffer);
+    Serial.println((char *)messageBuffer);
     //unknown command, do nothingz
   }
 }
