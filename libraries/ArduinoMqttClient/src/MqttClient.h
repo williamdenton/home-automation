@@ -32,17 +32,26 @@
 #define MQTT_BAD_USER_NAME_OR_PASSWORD      4
 #define MQTT_NOT_AUTHORIZED                 5
 
+// Make this definition in your application code to use std::functions for onMessage callbacks instead of C-pointers:
+// #define MQTT_CLIENT_STD_FUNCTION_CALLBACK
+
+#ifdef MQTT_CLIENT_STD_FUNCTION_CALLBACK
+#include <functional>
+#endif
+
 class MqttClient : public Client {
 public:
   MqttClient(Client* client);
   MqttClient(Client& client);
   virtual ~MqttClient();
 
-
+#ifdef MQTT_CLIENT_STD_FUNCTION_CALLBACK
+  typedef std::function<void(MqttClient *client, int messageSize)> MessageCallback;
+  void onMessage(MessageCallback callback);
+#else
   inline void setClient(Client& client) { _client = &client; }
-
-
   void onMessage(void(*)(int));
+#endif
 
   int parseMessage();
   String messageTopic() const;
@@ -96,6 +105,7 @@ public:
 
   void setKeepAliveInterval(unsigned long interval);
   void setConnectionTimeout(unsigned long timeout);
+  void setTxPayloadSize(unsigned short size);
 
   int connectError() const;
   int subscribeQoS() const;
@@ -133,7 +143,11 @@ private:
 private:
   Client* _client;
 
+#ifdef MQTT_CLIENT_STD_FUNCTION_CALLBACK
+  MessageCallback _onMessage;
+#else
   void (*_onMessage)(int);
+#endif
 
   String _id;
   String _username;
@@ -142,6 +156,7 @@ private:
 
   unsigned long _keepAliveInterval;
   unsigned long _connectionTimeout;
+  unsigned short _tx_payload_buffer_size;
 
   int _connectError;
   bool _connected;

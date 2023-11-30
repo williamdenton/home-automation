@@ -33,11 +33,9 @@
  */
 #include <Arduino.h>
 
-/*
- * Define macros for input and output pin etc.
- */
-#include "PinDefinitionsAndMore.h"
+#define DISABLE_CODE_FOR_RECEIVER // Disables restarting receiver after each send. Saves 450 bytes program memory and 269 bytes RAM if receiving functions are not used.
 
+#include "PinDefinitionsAndMore.h" // Define macros for input and output pin etc.
 #include <IRremote.hpp>
 
 //......................................................................
@@ -99,12 +97,6 @@
 //#define BOSE_CMD_ALARM_WAKE_TO  0x70
 //#define BOSE_CMD_ALARM_TIME     0x23
 
-
-// On the Zero and others we switch explicitly to SerialUSB
-#if defined(ARDUINO_ARCH_SAMD)
-#define Serial SerialUSB
-#endif
-
 bool sPrintMenu;
 void printMenu();
 
@@ -112,16 +104,19 @@ void setup() {
     pinMode(LED_BUILTIN, OUTPUT);
 
     Serial.begin(115200);
-#if defined(__AVR_ATmega32U4__) || defined(SERIAL_PORT_USBVIRTUAL) || defined(SERIAL_USB) || defined(SERIALUSB_PID) || defined(ARDUINO_attiny3217)
+#if defined(__AVR_ATmega32U4__) || defined(SERIAL_PORT_USBVIRTUAL) || defined(SERIAL_USB) /*stm32duino*/|| defined(USBCON) /*STM32_stm32*/|| defined(SERIALUSB_PID) || defined(ARDUINO_attiny3217)
     delay(4000); // To be able to connect Serial monitor after reset or power up and before first print out. Do not wait for an attached Serial Monitor!
 #endif
     // Just to know which program is running on my Arduino
     Serial.println(F("START " __FILE__ " from " __DATE__ "\r\nUsing library version " VERSION_IRREMOTE));
 
-    IrSender.begin(IR_SEND_PIN, ENABLE_LED_FEEDBACK); // Specify send pin and enable feedback LED at default feedback LED pin
-
-    Serial.print(F("Ready to send IR signals at pin "));
-    Serial.println(IR_SEND_PIN);
+#if defined(IR_SEND_PIN)
+    IrSender.begin(); // Start with IR_SEND_PIN as send pin and enable feedback LED at default feedback LED pin
+    Serial.println(F("Send IR signals at pin " STR(IR_SEND_PIN)));
+#else
+    IrSender.begin(3, ENABLE_LED_FEEDBACK, USE_DEFAULT_FEEDBACK_LED_PIN); // Specify send pin and enable feedback LED at default feedback LED pin
+    Serial.println(F("Send IR signals at pin 3"));
+#endif
 
     sPrintMenu = true;
 }

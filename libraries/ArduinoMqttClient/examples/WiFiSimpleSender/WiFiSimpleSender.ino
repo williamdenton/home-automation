@@ -5,7 +5,7 @@
   a topic once a second.
 
   The circuit:
-  - Arduino MKR 1000, MKR 1010 or Uno WiFi Rev.2 board
+  - Arduino MKR 1000, MKR 1010 or Uno WiFi Rev2 board
 
   This example code is in the public domain.
 */
@@ -15,13 +15,15 @@
   #include <WiFiNINA.h>
 #elif defined(ARDUINO_SAMD_MKR1000)
   #include <WiFi101.h>
-#elif defined(ARDUINO_ESP8266_ESP12)
+#elif defined(ARDUINO_ARCH_ESP8266)
   #include <ESP8266WiFi.h>
+#elif defined(ARDUINO_PORTENTA_H7_M7) || defined(ARDUINO_NICLA_VISION) || defined(ARDUINO_ARCH_ESP32) || defined(ARDUINO_GIGA)
+  #include <WiFi.h>
 #endif
 
 #include "arduino_secrets.h"
 ///////please enter your sensitive data in the Secret tab/arduino_secrets.h
-char ssid[] = SECRET_SSID;        // your network SSID (name)
+char ssid[] = SECRET_SSID;    // your network SSID (name)
 char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
 
 // To connect with SSL/TLS:
@@ -49,7 +51,7 @@ void setup() {
     ; // wait for serial port to connect. Needed for native USB port only
   }
 
-  // attempt to connect to Wifi network:
+  // attempt to connect to WiFi network:
   Serial.print("Attempting to connect to WPA SSID: ");
   Serial.println(ssid);
   while (WiFi.begin(ssid, pass) != WL_CONNECTED) {
@@ -87,7 +89,7 @@ void loop() {
   // avoids being disconnected by the broker
   mqttClient.poll();
 
-  // avoid having delays in loop, we'll use the strategy from BlinkWithoutDelay
+  // to avoid having delays in loop, we'll use the strategy from BlinkWithoutDelay
   // see: File -> Examples -> 02.Digital -> BlinkWithoutDelay for more info
   unsigned long currentMillis = millis();
   
